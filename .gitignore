@@ -1,3 +1,11 @@
 # IDE
 /.idea
 /.vscode
+
+# SMCR
+config.yml
+smcr.exe
+smcr
+
+# go releaser
+dist/

@@ -1,0 +1,9 @@
+listen: 0.0.0.0:7777
+log_level: info
+routes:
+  - name: default
+    matches: [localhost:7777]
+    target: 127.0.0.1:25565
+    # mimic: foobar:25565
+    # timeout: 1s
+    # timeout_message: oops

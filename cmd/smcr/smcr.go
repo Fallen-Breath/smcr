@@ -34,7 +34,7 @@ func main() {
 	go r.Run()
 
 	sig := <-ch
-	log.Infof("Terminating by %s", sig)
+	log.Infof("Terminating by signal %s", sig)
 	r.Stop()
 	log.Infof("SMCR stopped")
 }

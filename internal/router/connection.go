@@ -103,12 +103,12 @@ func (h *ConnectionHandler) handleConnection() {
 		return
 	}
 
-	h.logger.Infof("Connecting to %s", target)
+	h.logger.Infof("Dialing to target %s", target)
 	t := time.Now()
 	targetConn, err := net.DialTimeout("tcp", target, route.Timeout)
-	h.logger.Debugf("Dial to target address %s cost %dms", target, time.Now().Sub(t).Milliseconds())
+	h.logger.Debugf("Dial cost %dms", time.Now().Sub(t).Milliseconds())
 	if err != nil {
-		h.logger.Errorf("Dial to target address %s failed: %v", target, err)
+		h.logger.Errorf("Dial to target %s failed: %v", target, err)
 		if handshakePacket.NextState == protocol.HandshakeNextStateLogin && len(route.TimeoutMessage) > 0 {
 			var data string
 			if json.Unmarshal([]byte(route.TimeoutMessage), &json.RawMessage{}) == nil { // it's already a valid json
@@ -137,8 +137,10 @@ func (h *ConnectionHandler) handleConnection() {
 
 	// ============================== Start Forwarding ==============================
 
+	h.logger.Infof("Start forwarding")
 	h.forward(h.clientConn, targetConn)
-	h.logger.Debugf("Client connection end")
+
+	h.logger.Infof("Client connection end")
 }
 
 func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {

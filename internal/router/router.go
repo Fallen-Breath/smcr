@@ -46,15 +46,11 @@ func (r *MinecraftRouter) Run() {
 		log.Infof("[%d] Accepted connection #%d from %s", i, i, conn.RemoteAddr())
 
 		wg.Add(1)
-		go func(id int) {
+		go func(id int, conn net.Conn) {
 			defer wg.Done()
-			handler := ConnectionHandler{
-				id:         id,
-				config:     r.config,
-				clientConn: conn,
-			}
+			handler := NewConnectionHandler(id, r.config, conn)
 			handler.handleConnection()
-		}(i)
+		}(i, conn)
 	}
 
 	wg.Wait()

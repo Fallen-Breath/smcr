@@ -4,18 +4,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Fallen-Breath/smcr/internal/config"
+	"github.com/Fallen-Breath/smcr/internal/dns"
 	"github.com/Fallen-Breath/smcr/internal/protocol"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 type ConnectionHandler struct {
 	id         int
 	config     *config.Config
 	clientConn net.Conn
+	logger     *log.Entry
+}
+
+func NewConnectionHandler(id int, cfg *config.Config, clientConn net.Conn) *ConnectionHandler {
+	h := &ConnectionHandler{
+		id:         id,
+		config:     cfg,
+		clientConn: clientConn,
+	}
+	h.logger = log.WithField("client_id", id)
+	return h
 }
 
 func (h *ConnectionHandler) handleConnection() {
@@ -24,7 +38,7 @@ func (h *ConnectionHandler) handleConnection() {
 	closeConnection := func(conn net.Conn) {
 		err := conn.Close()
 		if err != nil {
-			log.Errorf("[%d] Failed to close connection: %v", h.id, err)
+			h.logger.Errorf("Failed to close connection: %v", err)
 		}
 	}
 	defer closeConnection(h.clientConn)
@@ -34,49 +48,51 @@ func (h *ConnectionHandler) handleConnection() {
 	connReadWriter := protocol.NewPacketReadWriter(h.clientConn)
 	handshakePacket, err := protocol.ReadHandshakePacket(connReadWriter)
 	if err != nil {
-		log.Errorf("[%d] Failed to read HandshakePacket from client: %v", h.id, err)
+		h.logger.Errorf("Failed to read handshake packet from client: %v", err)
 		return
 	}
 
 	// ============================== Do Route ==============================
 
-	address := fmt.Sprintf("%s:%d", handshakePacket.Address, handshakePacket.Port)
-	log.Infof("[%d] Address in HandShake: %s, from %s", h.id, address, h.clientConn.RemoteAddr())
-	route := h.config.RouteFor(address)
+	h.logger.Infof("Address in handshake packet: %s:%d", handshakePacket.Hostname, handshakePacket.Port)
+	route := h.RouteFor(handshakePacket.Hostname, handshakePacket.Port)
 	if route == nil {
-		log.Infof("[%d] Cannot found any endpoint for address %+v, closing connection", h.id, h.clientConn.RemoteAddr())
+		h.logger.Infof("Cannot found any endpoint for address %+v, closing connection", h.clientConn.RemoteAddr())
 		return
 	}
 
-	log.Infof("[%d] Selected route %s", h.id, route.Name)
+	h.logger.Infof("Selected route '%s'", route.Name)
 
 	if len(route.Mimic) > 0 {
 		host, portStr, err := net.SplitHostPort(route.Mimic)
 		if err == nil {
 			port, err := strconv.Atoi(portStr)
 			if err == nil {
-				handshakePacket.Address = host
+				handshakePacket.Hostname = host
 				handshakePacket.Port = uint16(port)
-				log.Errorf("[%d] Modified address&port to %s:%d", h.id, host, port)
+				h.logger.Infof("Modified address in handshake packet to %s:%d", host, port)
 			} else {
-				log.Errorf("[%d] Invalid port %s: %v", h.id, portStr, err)
+				h.logger.Errorf("Invalid port %s: %v", portStr, err)
 			}
 		} else {
-			log.Errorf("[%d] Invalid mimic address %s: %v", h.id, route.Mimic, err)
+			h.logger.Errorf("Invalid mimic address %s: %v", route.Mimic, err)
 		}
 	}
 
 	// ============================== Connect to Target ==============================
 
-	target, err := route.ResolveTarget()
+	target, err := h.resolveTarget(route)
 	if err != nil {
-		log.Errorf("[%d] Failed to resolve target for route %s: %v", h.id, route.Name, err)
+		h.logger.Errorf("Failed to resolve target for route %s: %v", route.Name, err)
 		return
 	}
-	log.Infof("[%d] Connecting to %s", h.id, target)
+
+	h.logger.Infof("Connecting to %s", target)
+	t := time.Now()
 	targetConn, err := net.DialTimeout("tcp", target, route.Timeout)
+	h.logger.Debugf("Dial to target address %s cost %dms", target, time.Now().Sub(t).Milliseconds())
 	if err != nil {
-		log.Errorf("[%d] dial to target address %s failed: %v", h.id, address, err)
+		h.logger.Errorf("Dial to target address %s failed: %v", target, err)
 		if handshakePacket.NextState == protocol.HandshakeNextStateLogin && len(route.TimeoutMessage) > 0 {
 			var data string
 			if json.Unmarshal([]byte(route.TimeoutMessage), &json.RawMessage{}) == nil { // it's already a valid json
@@ -88,9 +104,9 @@ func (h *ConnectionHandler) handleConnection() {
 			disconnectPacket := protocol.DisconnectPacket{Reason: data}
 			err := protocol.WritePacket(connReadWriter, &disconnectPacket)
 			if err != nil {
-				log.Errorf("[%d] Failed to send disconnect packet to client: %v", h.id, err)
+				h.logger.Errorf("Failed to send disconnect packet to client: %v", err)
 			}
-			log.Debugf("[%d] Sent disconnect packet %+v", h.id, disconnectPacket)
+			h.logger.Debugf("Sent disconnect packet %+v", disconnectPacket)
 		}
 		return
 	}
@@ -99,14 +115,14 @@ func (h *ConnectionHandler) handleConnection() {
 	// ============================== Write Handshake Packet ==============================
 
 	if err := protocol.WritePacket(protocol.NewPacketReadWriter(targetConn), handshakePacket); err != nil {
-		log.Errorf("[%d] Failed to write HandshakePacket to target: %v", h.id, err)
+		h.logger.Errorf("Failed to write handshake packet to target: %v", err)
 		return
 	}
 
 	// ============================== Start Forwarding ==============================
 
 	h.forward(h.clientConn, targetConn)
-	log.Infof("[%d] handleConnection end", h.id)
+	h.logger.Debugf("Client connection end")
 }
 
 func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
@@ -114,12 +130,12 @@ func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
 
 	singleForward := func(desc string, s net.Conn, t net.Conn) {
 		defer wg.Done()
-		log.Debugf("[%d] Forward start for %s", h.id, desc)
+		h.logger.Debugf("Forward start for %s", desc)
 		n, err := io.Copy(t, s)
 		if err != nil {
-			log.Warningf("[%d] Forward error for %s: %v", h.id, desc, err)
+			h.logger.Warningf("Forward error for %s: %v", desc, err)
 		}
-		log.Debugf("[%d] Forward end for %s, bytes transfered = %d", h.id, desc, n)
+		h.logger.Debugf("Forward end for %s, bytes transfered = %d", desc, n)
 	}
 
 	wg.Add(1)
@@ -127,4 +143,43 @@ func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
 	wg.Add(1)
 	go singleForward("client <- target", target, source)
 	wg.Wait()
+}
+
+// RouteFor might return nullable
+func (h *ConnectionHandler) RouteFor(hostname string, port uint16) *config.Route {
+	address := fmt.Sprintf("%s:%d", hostname, port)
+	routeMap := h.config.GetRouteMap()
+
+	if route, ok := routeMap[address]; ok {
+		h.logger.Debugf("Selected route %s for address %s", route.Name, address)
+		return route
+	}
+	if route, ok := routeMap[hostname]; ok {
+		h.logger.Debugf("Selected route %s for hostname %s", route.Name, address)
+		return route
+	}
+
+	if defaultRoute := h.config.GetDefaultRoute(); defaultRoute != nil {
+		h.logger.Debugf("Selected default route for address %s", address)
+		return defaultRoute
+	}
+
+	h.logger.Debugf("No valid route for address %s", address)
+	return nil
+}
+
+func (h *ConnectionHandler) resolveTarget(route *config.Route) (string, error) {
+	if !strings.Contains(route.Target, ":") { // no port, might be an SRV record
+		t := time.Now()
+		resolved, err := dns.ResolveSrv(route.Target, h.config.SrvLookupTimeout)
+		h.logger.Debugf("SRV Resolution for %s cost %dms", route.Target, time.Now().Sub(t).Milliseconds())
+
+		if err == nil {
+			return resolved, nil
+		} else {
+			h.logger.Debugf("Resolved SRV record for %s failed: %v", route.Target, err)
+		}
+		return fmt.Sprintf("%s:25565", route.Target), nil
+	}
+	return route.Target, nil
 }

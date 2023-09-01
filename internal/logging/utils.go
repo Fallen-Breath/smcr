@@ -31,6 +31,10 @@ func (m MyFormatter) Format(entry *log.Entry) ([]byte, error) {
 		filePos = fmt.Sprintf(" %s:%d(%s)", fileName, entry.Caller.Line, funcName)
 	}
 
+	if id, ok := entry.Data["client_id"]; ok {
+		entry.Message = fmt.Sprintf("[%d] %s", id, entry.Message)
+	}
+
 	s := fmt.Sprintf(
 		"[%s %s%s] %s\n",
 		entry.Time.Format("2006-01-02 15:04:05.000"), level,

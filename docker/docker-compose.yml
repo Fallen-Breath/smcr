@@ -1,0 +1,10 @@
+version: '3'
+services:
+  smcr:
+    image: fallenbreath/smcr:latest
+    container_name: smcr
+    restart: unless-stopped
+    ports:
+      - "7777:7777"
+    volumes:
+      - ./config.yml:/app/config.yml:ro

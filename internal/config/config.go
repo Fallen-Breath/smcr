@@ -4,6 +4,7 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -11,59 +12,60 @@ const DefaultRouteName = "default"
 
 type Route struct {
 	Name           string        `yaml:"name"`
-	Matches        []string      `yaml:"matches"` // match any of them
-	Target         string        `yaml:"target"`
-	TargetSrv      string        `yaml:"target_srv"`
+	Matches        []string      `yaml:"matches"`         // match any of them -> use this route. Port is optional. Addresses with port has higher priority
+	Target         string        `yaml:"target"`          // The target server to route for. Port is optional (use 25565 if absent)
 	Mimic          string        `yaml:"mimic"`           // optional
-	Timeout        time.Duration `yaml:"timeout_ms"`      // optional, default 3s
+	Timeout        time.Duration `yaml:"timeout_ms"`      // optional, default DefaultConnectTimeout
 	TimeoutMessage string        `yaml:"timeout_message"` // optional
 }
 
 type Config struct {
-	Listen   string  `yaml:"listen"`
-	LogLevel string  `yaml:"log_level"`
-	Routes   []Route `yaml:"routes"`
+	Listen                string        `yaml:"listen"`
+	LogLevel              string        `yaml:"log_level"`
+	DefaultConnectTimeout time.Duration `yaml:"default_connect_timeout"` // optional, default 3s
+	SrvLookupTimeout      time.Duration `yaml:"srv_lookup_timeout"`      // optional, default 3s
+	Routes                []Route       `yaml:"routes"`
 
 	routeMap     map[string]*Route `yaml:"-"` // match_addr -> route
 	defaultRoute *Route            `yaml:"-"`
-}
-
-func (r *Route) ResolveTarget() (string, error) {
-	if len(r.Target) > 0 {
-		return r.Target, nil
-	} else if len(r.TargetSrv) > 0 {
-		_, addrs, err := net.LookupSRV("minecraft", "tcp", r.TargetSrv)
-		if err != nil {
-			return "", fmt.Errorf("resolve srv %s failed: %v", r.TargetSrv, err)
-		}
-		if len(addrs) == 0 {
-			return "", fmt.Errorf("srv %s has empty result", r.TargetSrv)
-		}
-		return fmt.Sprintf("%s:%d", addrs[0].Target, addrs[0].Port), nil
-	} else {
-		return "", fmt.Errorf("route %+v does not have any valid target", r)
-	}
 }
 
 func validateAddress(what string, address string) {
 	if len(address) == 0 {
 		log.Fatalf("Field %s is empty", what)
 	}
-	if _, _, err := net.SplitHostPort(address); err != nil {
+
+	addrToTest := address
+	if !strings.Contains(address, ":") {
+		addrToTest = address + ":25565"
+	}
+
+	if _, _, err := net.SplitHostPort(addrToTest); err != nil {
 		log.Fatalf("Field '%s' with value %s is not a valid address: %v", what, address, err)
 	}
 }
 
 func (c *Config) Init() {
 	// fill default values
+	if c.DefaultConnectTimeout <= 0 {
+		c.DefaultConnectTimeout = 3 * time.Second
+	}
+	if c.SrvLookupTimeout <= 0 {
+		c.SrvLookupTimeout = 3 * time.Second
+	}
 	for i := range c.Routes {
 		route := &c.Routes[i]
 		if route.Timeout <= 0 {
-			route.Timeout = 5 * time.Second
+			route.Timeout = c.DefaultConnectTimeout
 		}
 	}
 
-	// validate
+	// validate && apply
+	level, err := log.ParseLevel(c.LogLevel)
+	if err != nil {
+		log.Fatalf("Invalid log level %s: %v", c.LogLevel, err)
+	}
+	log.SetLevel(level)
 
 	validateAddress("listen", c.Listen)
 	for i := range c.Routes {
@@ -73,8 +75,8 @@ func (c *Config) Init() {
 		}
 		if len(route.Target) > 0 {
 			validateAddress(fmt.Sprintf("routes[%d]target", i), route.Target)
-		} else if len(route.TargetSrv) == 0 {
-			log.Fatalf("routes[%d] does not specify any valid target", i)
+		} else {
+			log.Fatalf("routes[%d] does not specify the target", i)
 		}
 		if len(route.Mimic) > 0 {
 			validateAddress(fmt.Sprintf("routes[%d]mimic", i), route.Mimic)
@@ -89,7 +91,7 @@ func (c *Config) Init() {
 		if route.Name == DefaultRouteName {
 			c.defaultRoute = route
 			if len(route.Matches) > 0 {
-				log.Warnf("matches field for default route is useless")
+				log.Warnf("'matches' field for default route is useless")
 			}
 		} else {
 			for _, addr := range route.Matches {
@@ -113,23 +115,17 @@ func (c *Config) Dump() {
 
 	log.Debugf("Route map (len=%d):", len(c.routeMap))
 	for addr, route := range c.routeMap {
-		log.Infof("- %s -> %s", addr, sr(route))
+		log.Debugf("- %s -> %s", addr, sr(route))
 	}
 	if c.defaultRoute != nil {
-		log.Infof("- default route -> %s", sr(c.defaultRoute))
+		log.Debugf("* default route -> %s", sr(c.defaultRoute))
 	}
 }
 
-// RouteFor might return nullable
-func (c *Config) RouteFor(address string) *Route {
-	if route, ok := c.routeMap[address]; ok {
-		log.Debugf("Selected route %s for address %s", route.Name, address)
-		return route
-	}
-	if c.defaultRoute != nil {
-		log.Debugf("Selected default route for address %s", address)
-		return c.defaultRoute
-	}
-	log.Debugf("No valid route for address %s", address)
-	return nil
+func (c *Config) GetRouteMap() map[string]*Route {
+	return c.routeMap
+}
+
+func (c *Config) GetDefaultRoute() *Route {
+	return c.defaultRoute
 }

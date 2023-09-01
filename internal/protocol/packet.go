@@ -113,7 +113,7 @@ type Packet interface {
 // HandshakePacket is in handshake state, C2S
 type HandshakePacket struct {
 	Protocol  int32
-	Address   string
+	Hostname  string
 	Port      uint16
 	NextState int32
 }
@@ -127,32 +127,32 @@ func (p *HandshakePacket) GetId() int32 {
 func (p *HandshakePacket) ReadFrom(reader BufferReader) error {
 	var err error
 	if p.Protocol, err = reader.ReadVarInt(); err != nil {
-		return fmt.Errorf("failed to read HandShake protocol: %v", err)
+		return fmt.Errorf("failed to read handshake protocol: %v", err)
 	}
-	if p.Address, err = reader.ReadString(); err != nil {
-		return fmt.Errorf("failed to read HandShake address: %v", err)
+	if p.Hostname, err = reader.ReadString(); err != nil {
+		return fmt.Errorf("failed to read handshake address: %v", err)
 	}
 	if p.Port, err = reader.ReadUnsignedShort(); err != nil {
-		return fmt.Errorf("failed to read HandShake port: %v", err)
+		return fmt.Errorf("failed to read handshake port: %v", err)
 	}
 	if p.NextState, err = reader.ReadVarInt(); err != nil {
-		return fmt.Errorf("failed to read HandShake next state: %v", err)
+		return fmt.Errorf("failed to read handshake next state: %v", err)
 	}
 	return nil
 }
 
 func (p *HandshakePacket) WriteTo(writer BufferWriter) error {
 	if err := writer.WriteVarInt(p.Protocol); err != nil {
-		return fmt.Errorf("failed to write HandShake protocol: %v", err)
+		return fmt.Errorf("failed to write handshake protocol: %v", err)
 	}
-	if err := writer.WriteString(p.Address); err != nil {
-		return fmt.Errorf("failed to write HandShake address: %v", err)
+	if err := writer.WriteString(p.Hostname); err != nil {
+		return fmt.Errorf("failed to write handshake address: %v", err)
 	}
 	if err := writer.WriteUnsignedShort(p.Port); err != nil {
-		return fmt.Errorf("failed to write HandShake port: %v", err)
+		return fmt.Errorf("failed to write handshake port: %v", err)
 	}
 	if err := writer.WriteVarInt(p.NextState); err != nil {
-		return fmt.Errorf("failed to write HandShake next state: %v", err)
+		return fmt.Errorf("failed to write handshake next state: %v", err)
 	}
 	return nil
 }

@@ -22,6 +22,8 @@ type ConnectionHandler struct {
 	logger     *log.Entry
 }
 
+const handshakeMaxTimeWait = 20 * time.Second
+
 func NewConnectionHandler(id int, cfg *config.Config, clientConn net.Conn) *ConnectionHandler {
 	h := &ConnectionHandler{
 		id:         id,
@@ -32,23 +34,37 @@ func NewConnectionHandler(id int, cfg *config.Config, clientConn net.Conn) *Conn
 	return h
 }
 
+func (h *ConnectionHandler) closeConnection(name string, conn net.Conn) {
+	err := conn.Close()
+	if err != nil {
+		h.logger.Errorf("Failed to close %s connection: %v", name, err)
+	}
+}
+
 func (h *ConnectionHandler) handleConnection() {
 	// ============================== Prepare ==============================
 
-	closeConnection := func(conn net.Conn) {
-		err := conn.Close()
-		if err != nil {
-			h.logger.Errorf("Failed to close connection: %v", err)
-		}
+	var once sync.Once
+	closeClientConn := func() {
+		h.closeConnection("client", h.clientConn)
 	}
-	defer closeConnection(h.clientConn)
+	defer once.Do(closeClientConn)
 
 	// ============================== Read Handshake Packet ==============================
 
+	handshakeTimeout := false
+	timer := time.AfterFunc(handshakeMaxTimeWait, func() {
+		h.logger.Errorf("Wait for handshake packet times out (%.0fs), closing connection", handshakeMaxTimeWait.Seconds())
+		handshakeTimeout = true
+		once.Do(closeClientConn)
+	})
 	connReadWriter := protocol.NewPacketReadWriter(h.clientConn)
 	handshakePacket, err := protocol.ReadHandshakePacket(connReadWriter)
+	timer.Stop()
 	if err != nil {
-		h.logger.Errorf("Failed to read handshake packet from client: %v", err)
+		if !handshakeTimeout {
+			h.logger.Errorf("Failed to read handshake packet from client: %v", err)
+		}
 		return
 	}
 
@@ -110,7 +126,7 @@ func (h *ConnectionHandler) handleConnection() {
 		}
 		return
 	}
-	defer closeConnection(targetConn)
+	defer h.closeConnection("target", targetConn)
 
 	// ============================== Write Handshake Packet ==============================
 

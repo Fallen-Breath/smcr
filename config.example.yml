@@ -2,22 +2,32 @@
 listen: 0.0.0.0:7777
 debug: false
 routes:
-  # regular
+  # A basic route example
   - name: foo
     matches:
       - localhost:7777
     target: 127.0.0.1:25565
 
+  # A more complex route example, with all possible options
   - name: bar
     matches:
-      - 127.0.0.1:7777
-      - mc.example.com
+      - 127.0.0.1:7777  # hostname + port, exact match
+      - mc.example.com  # hostname only
     target: 127.0.0.1:25566
     mimic: mc.example.com:25566
+    timeout: 1s
+    dial_fail_message: oops, the server might be down
 
-  - name: default
+  # An example route with the reject action
+  - name: baz
+    matches:
+      - bad.host.name
     action: reject
-    # reject_message: oops
+    reject_message: '{"text": "rejected", "color": "red"}'
+
+  # A default
+  - name: default
+    target: 127.0.0.1:25567
 
 srv_lookup_timeout: 3s
 default_connect_timeout: 3s

@@ -1,6 +1,29 @@
 # SMCR: Simple Minecraft Router
 
-A simple Minecraft router using the server address in the [handshake](https://wiki.vg/Protocol#Handshake) packet
+A simple Minecraft router that routes using the server address in the [handshake](https://wiki.vg/Protocol#Handshake) packet
+
+With SMCR, you can connect to multiple Minecraft servers with only 1 port,
+which is helpful if you don't want to expose too many ports, 
+or you're using reversed proxy like [frp](https://github.com/fatedier/frp) that only provides a few ports
+
+```mermaid
+flowchart LR
+    client1[Minecraft Client 1] -- a.example.com --> SMCR
+    client2[Minecraft Client 2] -- b.example.com --> SMCR
+    client3[Minecraft Client 3] -- c.example.com --> SMCR
+    client4[Minecraft Client 4] -- "bad.host.name (rejected)" --x SMCR
+    
+    SMCR -- client 1 --> server1[Minecraft Server A]
+    SMCR -- client 2 --> server2[Minecraft Server B]
+    SMCR -- client 3 --> server3[Minecraft Server C]
+```
+
+## Similar projects
+
+There are some similar projects that provides better support on metrics / high availability, go check them out:
+
+- https://github.com/itzg/mc-router
+- https://github.com/haveachin/infrared
 
 ## Usages
 
@@ -17,7 +40,7 @@ An example config file with all available options can be found [here](config.exa
 
 Here's a detailed explanation of all options in the config file
 
-### General settings
+### General options
 
 #### listen
 
@@ -65,6 +88,8 @@ srv_lookup_timeout: 3s
 
 The timeout for connect to a route target
 
+You can set a lower timeout for fast response, if SMCR and the target server is in the same LAN
+
 See section [timeout format section](#timeout-format) for more details on its format
 
 ```yaml
@@ -106,7 +131,7 @@ matches:
 
 #### action
 
-Optional setting, define what SMCR will do with this route for the client connection
+Optional option, define what SMCR will do with this route for the client connection
 
 | action    | explanation                                              |
 |-----------|----------------------------------------------------------|
@@ -123,7 +148,7 @@ action: forward
 
 *Available when `reject` is `true`*
 
-Optional setting, the message to be sent back to the client as the disconnect reason
+Optional option, the message to be sent back to the client as the disconnect reason
 
 If not given, SMCR will just close the connection directly
 
@@ -150,7 +175,7 @@ target: 127.0.0.1:25565
 
 *Available when `reject` is `false`*
 
-Optional setting. If given, SMCR will modify the hostname and port in the handshake packet
+Optional option. If given, SMCR will modify the hostname and port in the handshake packet
 
 It should be an address with hostname and port
 
@@ -176,9 +201,8 @@ timeout: 5s
 
 ### Default route
 
-A route named `default` is the default route, which works as a fallback route
-
-It accepts all client connection, only when other routes fail to match client's connecting address
+A route named `default` is the default route, which works as a fallback route for the unmatched client connections.
+It accepts all client connections, only when other routes fail to match client's connecting address
 
 The `matches` field of the default route is ignored
 
@@ -196,6 +220,9 @@ reject_message: '{"text": "oops", "color": "red"}'
 name: default
 target: localhost:20000
 ```
+
+If there's no default route in the config, unmatched client connections will be simply discard, 
+just like a default route with reject action and no reject message
 
 ### Field formats
 
@@ -235,4 +262,10 @@ example_message3: this is a plain text
 
 The docker image of SMCR is released at [DockerHub](https://hub.docker.com/repository/docker/fallenbreath/smcr)
 
-You can also use [the example docker-compose.yml](docker/docker-compose.yml) as an example `docker-compose.yml` file
+You can run SMCR with the following command
+
+```bash
+docker run -p 7777:7777 -v ./config.yml:/app/config.yml fallenbreath/smcr:latest
+```
+
+You can also use [the example docker-compose.yml](docker/docker-compose.yml) as an example `docker-compose.yml` file to run SMCR

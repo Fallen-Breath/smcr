@@ -79,9 +79,6 @@ func WritePacket(writer BufferWriter, packet Packet) error {
 			return fmt.Errorf("failed to serialize packet fields: %v", err)
 		}
 
-		if err := bodyWriter.Flush(); err != nil {
-			return fmt.Errorf("failed to flush buffer: %v", err)
-		}
 		packetBody, err := bodyWriter.Read(bodyWriter.GetWriteLen())
 		if err != nil {
 			return fmt.Errorf("failed to extract buffer: %v", err)
@@ -92,9 +89,6 @@ func WritePacket(writer BufferWriter, packet Packet) error {
 		}
 		if err := writer.Write(packetBody); err != nil {
 			return fmt.Errorf("failed to write packet body: %v", err)
-		}
-		if err := writer.Flush(); err != nil {
-			return fmt.Errorf("failed to flush written packet: %v", err)
 		}
 		return nil
 

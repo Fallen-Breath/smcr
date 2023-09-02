@@ -27,7 +27,6 @@ type BufferReader interface {
 
 type BufferWriter interface {
 	GetWriteLen() int
-	Flush() error
 	Write(b []byte) error
 
 	WriteUInt8(value uint8) error   // Unsigned byte
@@ -46,8 +45,13 @@ type BufferReadWriter interface {
 	BufferWriter
 }
 
+type bufferedReadDirectWriter struct {
+	reader *bufio.Reader
+	writer io.Writer
+}
+
 type bufferReadWriterImpl struct {
-	buf      *bufio.ReadWriter
+	buf      bufferedReadDirectWriter
 	writeLen int
 	readLen  int
 }
@@ -56,7 +60,10 @@ var _ BufferReadWriter = &bufferReadWriterImpl{}
 
 func NewBufferReadWriter(buf io.ReadWriter) BufferReadWriter {
 	return &bufferReadWriterImpl{
-		buf:      bufio.NewReadWriter(bufio.NewReader(buf), bufio.NewWriter(buf)),
+		buf: bufferedReadDirectWriter{
+			reader: bufio.NewReader(buf),
+			writer: buf,
+		},
 		readLen:  0,
 		writeLen: 0,
 	}
@@ -76,17 +83,12 @@ func (p *bufferReadWriterImpl) GetWriteLen() int {
 }
 
 func (p *bufferReadWriterImpl) Peek(n int) ([]byte, error) {
-	return p.buf.Peek(n)
+	return p.buf.reader.Peek(n)
 }
 
-func (p *bufferReadWriterImpl) Flush() error {
-	return p.buf.Flush()
-}
-
-// If the underlying buf is a bytes.Buffer, make sure to Flush before Reading
 func (p *bufferReadWriterImpl) Read(n int) ([]byte, error) {
 	b := make([]byte, n)
-	n, err := p.buf.Read(b)
+	n, err := p.buf.reader.Read(b)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +100,7 @@ func (p *bufferReadWriterImpl) Read(n int) ([]byte, error) {
 }
 
 func (p *bufferReadWriterImpl) Write(b []byte) error {
-	n, err := p.buf.Write(b)
+	n, err := p.buf.writer.Write(b)
 	if err != nil {
 		return err
 	}

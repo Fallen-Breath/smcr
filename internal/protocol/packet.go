@@ -166,9 +166,6 @@ func (p *LegacyServerListPingPacket) WriteTo(writer BufferWriter) error {
 		return fmt.Errorf("failed to write port: %v", err)
 	}
 
-	if err := w.Flush(); err != nil {
-		return fmt.Errorf("failed to flush buffer: %v", err)
-	}
 	b, err := w.Read(w.GetWriteLen())
 	if err != nil {
 		return fmt.Errorf("failed to extract buffer: %v", err)

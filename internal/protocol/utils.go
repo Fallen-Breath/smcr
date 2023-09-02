@@ -5,12 +5,14 @@ import (
 	"fmt"
 )
 
-func ReadHandshakePacket(reader BufferReader) (IHandshakePacket, error) {
-	head, err := reader.Peek(1)
+func ReadHandshakePacket(reader BufReader) (IHandshakePacket, error) {
+	// since we peek only 1 byte, and will always consume more than 1 byte in the following process,
+	// we don't need to worry about unread bytes in the peek buffer
+	head, err := reader.PeekByte()
 	if err != nil {
-		return nil, fmt.Errorf("failed to peak the first byte: %v", err)
+		return nil, fmt.Errorf("failed to peek the first byte: %v", err)
 	}
-	if head[0] == legacyHandshakeMagic {
+	if head == legacyHandshakeMagic {
 		return readLegacyServerListPing(reader)
 	}
 
@@ -29,7 +31,7 @@ func ReadHandshakePacket(reader BufferReader) (IHandshakePacket, error) {
 	return packet.(*HandshakePacket), nil
 }
 
-func ReadModernPacket(reader BufferReader, packetFactory func(int32) (ModernPacket, error)) (ModernPacket, error) {
+func ReadModernPacket(reader BufReader, packetFactory func(int32) (ModernPacket, error)) (ModernPacket, error) {
 	packetLen, err := reader.ReadVarInt()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read packet length: %v", err)
@@ -39,7 +41,7 @@ func ReadModernPacket(reader BufferReader, packetFactory func(int32) (ModernPack
 	if err != nil {
 		return nil, fmt.Errorf("failed to read packet body: %v", err)
 	}
-	var bodyReader BufferReader = NewBufferReadWriter(bytes.NewBuffer(packetBody[:]))
+	var bodyReader BufReader = NewBufferReadWriter(bytes.NewBuffer(packetBody[:]))
 
 	packetId, err := bodyReader.ReadVarInt()
 	if err != nil {
@@ -61,7 +63,7 @@ func ReadModernPacket(reader BufferReader, packetFactory func(int32) (ModernPack
 	return packet, nil
 }
 
-func readLegacyServerListPing(reader BufferReader) (*LegacyServerListPingPacket, error) {
+func readLegacyServerListPing(reader BufReader) (*LegacyServerListPingPacket, error) {
 	packet := LegacyServerListPingPacket{}
 	if err := packet.ReadFrom(reader); err != nil {
 		return nil, fmt.Errorf("failed to read legacy server list ping packet: %v", err)
@@ -69,7 +71,7 @@ func readLegacyServerListPing(reader BufferReader) (*LegacyServerListPingPacket,
 	return &packet, nil
 }
 
-func WritePacket(writer BufferWriter, packet Packet) error {
+func WritePacket(writer BufWriter, packet Packet) error {
 	if mp, ok := packet.(ModernPacket); ok {
 		bodyWriter := NewBufferReadWriter(&bytes.Buffer{})
 		if err := bodyWriter.WriteVarInt(mp.GetId()); err != nil {

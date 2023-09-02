@@ -17,8 +17,8 @@ const (
 )
 
 type Packet interface {
-	ReadFrom(reader BufferReader) error
-	WriteTo(writer BufferWriter) error
+	ReadFrom(reader BufReader) error
+	WriteTo(writer BufWriter) error
 }
 
 type ModernPacket interface {
@@ -58,7 +58,7 @@ func (p *HandshakePacket) GetId() int32 {
 	return HandShakePacketId
 }
 
-func (p *HandshakePacket) ReadFrom(reader BufferReader) error {
+func (p *HandshakePacket) ReadFrom(reader BufReader) error {
 	var err error
 	if p.Protocol, err = reader.ReadVarInt(); err != nil {
 		return fmt.Errorf("failed to read handshake protocol: %v", err)
@@ -75,7 +75,7 @@ func (p *HandshakePacket) ReadFrom(reader BufferReader) error {
 	return nil
 }
 
-func (p *HandshakePacket) WriteTo(writer BufferWriter) error {
+func (p *HandshakePacket) WriteTo(writer BufWriter) error {
 	if err := writer.WriteVarInt(p.Protocol); err != nil {
 		return fmt.Errorf("failed to write handshake protocol: %v", err)
 	}
@@ -120,7 +120,7 @@ func (p *LegacyServerListPingPacket) GetPort() *uint16 {
 	return &p.Port
 }
 
-func (p *LegacyServerListPingPacket) ReadFrom(reader BufferReader) error {
+func (p *LegacyServerListPingPacket) ReadFrom(reader BufReader) error {
 	var err error
 	if p.Header, err = reader.Read(len(legacyServerPingHead)); err != nil {
 		return fmt.Errorf("failed to read header: %v", err)
@@ -150,7 +150,7 @@ func (p *LegacyServerListPingPacket) ReadFrom(reader BufferReader) error {
 	return nil
 }
 
-func (p *LegacyServerListPingPacket) WriteTo(writer BufferWriter) error {
+func (p *LegacyServerListPingPacket) WriteTo(writer BufWriter) error {
 	if err := writer.Write(p.Header); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
@@ -191,7 +191,7 @@ func (p *DisconnectPacket) GetId() int32 {
 	return DisconnectPacketId
 }
 
-func (p *DisconnectPacket) ReadFrom(reader BufferReader) error {
+func (p *DisconnectPacket) ReadFrom(reader BufReader) error {
 	var err error
 	if p.Reason, err = reader.ReadString(); err != nil {
 		return fmt.Errorf("failed to read DisconnectPacket reason: %v", err)
@@ -199,7 +199,7 @@ func (p *DisconnectPacket) ReadFrom(reader BufferReader) error {
 	return nil
 }
 
-func (p *DisconnectPacket) WriteTo(writer BufferWriter) error {
+func (p *DisconnectPacket) WriteTo(writer BufWriter) error {
 	if err := writer.WriteString(p.Reason); err != nil {
 		return fmt.Errorf("failed to write DisconnectPacket reason: %v", err)
 	}

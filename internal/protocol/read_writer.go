@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -9,9 +8,15 @@ import (
 	"unicode/utf16"
 )
 
-type BufferReader interface {
+type PeekableReader interface {
+	// PeekByte for detecting the legacy ping packet
+	PeekByte() (byte, error)
+}
+
+type BufReader interface {
+	PeekableReader
+
 	GetReadLen() int
-	Peek(n int) ([]byte, error)
 	Read(n int) ([]byte, error)
 
 	ReadUInt8() (uint8, error)   // Unsigned byte
@@ -25,7 +30,7 @@ type BufferReader interface {
 	ReadUTF16BE() (string, error)
 }
 
-type BufferWriter interface {
+type BufWriter interface {
 	GetWriteLen() int
 	Write(b []byte) error
 
@@ -40,30 +45,24 @@ type BufferWriter interface {
 	WriteUTF16BE(s string) error
 }
 
-type BufferReadWriter interface {
-	BufferReader
-	BufferWriter
+type BufReadWriter interface {
+	BufReader
+	PeekableReader
+	BufWriter
 }
 
-type bufferedReadDirectWriter struct {
-	reader *bufio.Reader
-	writer io.Writer
-}
-
-type bufferReadWriterImpl struct {
-	buf      bufferedReadDirectWriter
+type bufReadWriterImpl struct {
+	rw       io.ReadWriter
+	peekByte *byte
 	writeLen int
 	readLen  int
 }
 
-var _ BufferReadWriter = &bufferReadWriterImpl{}
+var _ BufReadWriter = &bufReadWriterImpl{}
 
-func NewBufferReadWriter(buf io.ReadWriter) BufferReadWriter {
-	return &bufferReadWriterImpl{
-		buf: bufferedReadDirectWriter{
-			reader: bufio.NewReader(buf),
-			writer: buf,
-		},
+func NewBufferReadWriter(buf io.ReadWriter) BufReadWriter {
+	return &bufReadWriterImpl{
+		rw:       buf,
 		readLen:  0,
 		writeLen: 0,
 	}
@@ -74,33 +73,59 @@ const (
 	varIntContinueBit = 0x80
 )
 
-func (p *bufferReadWriterImpl) GetReadLen() int {
+func (p *bufReadWriterImpl) GetReadLen() int {
 	return p.readLen
 }
 
-func (p *bufferReadWriterImpl) GetWriteLen() int {
+func (p *bufReadWriterImpl) GetWriteLen() int {
 	return p.writeLen
 }
 
-func (p *bufferReadWriterImpl) Peek(n int) ([]byte, error) {
-	return p.buf.reader.Peek(n)
+func (p *bufReadWriterImpl) PeekByte() (byte, error) {
+	if p.peekByte != nil {
+		return *p.peekByte, nil
+	}
+	b, err := p.read(1)
+	if err != nil {
+		return 0, err
+	}
+	p.peekByte = &b[0]
+	return b[0], nil
 }
 
-func (p *bufferReadWriterImpl) Read(n int) ([]byte, error) {
+func (p *bufReadWriterImpl) Read(n int) ([]byte, error) {
+	peek := p.peekByte
+	if p.peekByte != nil {
+		n -= 1
+		p.peekByte = nil
+	}
+	b, err := p.read(n)
+	if err != nil {
+		return nil, err
+	}
+	if peek != nil {
+		p.readLen += n + 1
+		b = append([]byte{*peek}, b...)
+	} else {
+		p.readLen += n
+	}
+	return b, nil
+}
+
+func (p *bufReadWriterImpl) read(n int) ([]byte, error) {
 	b := make([]byte, n)
-	n, err := p.buf.reader.Read(b)
+	n, err := io.ReadFull(p.rw, b)
 	if err != nil {
 		return nil, err
 	}
 	if n != len(b) {
 		return nil, fmt.Errorf("read not enougth bytes, expected read %d, actual read %d", len(b), n)
 	}
-	p.readLen += n
 	return b, nil
 }
 
-func (p *bufferReadWriterImpl) Write(b []byte) error {
-	n, err := p.buf.writer.Write(b)
+func (p *bufReadWriterImpl) Write(b []byte) error {
+	n, err := p.rw.Write(b)
 	if err != nil {
 		return err
 	}
@@ -111,7 +136,7 @@ func (p *bufferReadWriterImpl) Write(b []byte) error {
 	return nil
 }
 
-func (p *bufferReadWriterImpl) ReadUInt8() (uint8, error) {
+func (p *bufReadWriterImpl) ReadUInt8() (uint8, error) {
 	b, err := p.Read(1)
 	if err != nil {
 		return 0, err
@@ -119,11 +144,11 @@ func (p *bufferReadWriterImpl) ReadUInt8() (uint8, error) {
 	return b[0], nil
 }
 
-func (p *bufferReadWriterImpl) WriteUInt8(value uint8) error {
+func (p *bufReadWriterImpl) WriteUInt8(value uint8) error {
 	return p.Write([]byte{value})
 }
 
-func (p *bufferReadWriterImpl) ReadUInt16() (uint16, error) {
+func (p *bufReadWriterImpl) ReadUInt16() (uint16, error) {
 	b, err := p.Read(2)
 	if err != nil {
 		return 0, err
@@ -131,13 +156,13 @@ func (p *bufferReadWriterImpl) ReadUInt16() (uint16, error) {
 	return binary.BigEndian.Uint16(b), nil
 }
 
-func (p *bufferReadWriterImpl) WriteUInt16(value uint16) error {
+func (p *bufReadWriterImpl) WriteUInt16(value uint16) error {
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, value)
 	return p.Write(b)
 }
 
-func (p *bufferReadWriterImpl) ReadInt16() (int16, error) {
+func (p *bufReadWriterImpl) ReadInt16() (int16, error) {
 	value, err := p.ReadUInt16()
 	if err != nil {
 		return 0, err
@@ -145,11 +170,11 @@ func (p *bufferReadWriterImpl) ReadInt16() (int16, error) {
 	return int16(value), err
 }
 
-func (p *bufferReadWriterImpl) WriteInt16(value int16) error {
+func (p *bufReadWriterImpl) WriteInt16(value int16) error {
 	return p.WriteUInt16(uint16(value))
 }
 
-func (p *bufferReadWriterImpl) ReadUInt32() (uint32, error) {
+func (p *bufReadWriterImpl) ReadUInt32() (uint32, error) {
 	b, err := p.Read(4)
 	if err != nil {
 		return 0, err
@@ -157,13 +182,13 @@ func (p *bufferReadWriterImpl) ReadUInt32() (uint32, error) {
 	return binary.BigEndian.Uint32(b), nil
 }
 
-func (p *bufferReadWriterImpl) WriteUInt32(value uint32) error {
+func (p *bufReadWriterImpl) WriteUInt32(value uint32) error {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, value)
 	return p.Write(b)
 }
 
-func (p *bufferReadWriterImpl) ReadInt32() (int32, error) {
+func (p *bufReadWriterImpl) ReadInt32() (int32, error) {
 	value, err := p.ReadUInt32()
 	if err != nil {
 		return 0, err
@@ -171,11 +196,11 @@ func (p *bufferReadWriterImpl) ReadInt32() (int32, error) {
 	return int32(value), err
 }
 
-func (p *bufferReadWriterImpl) WriteInt32(value int32) error {
+func (p *bufReadWriterImpl) WriteInt32(value int32) error {
 	return p.WriteUInt32(uint32(value))
 }
 
-func (p *bufferReadWriterImpl) ReadVarInt() (int32, error) {
+func (p *bufReadWriterImpl) ReadVarInt() (int32, error) {
 	var value int32 = 0
 	position := 0
 	for {
@@ -197,7 +222,7 @@ func (p *bufferReadWriterImpl) ReadVarInt() (int32, error) {
 	return value, nil
 }
 
-func (p *bufferReadWriterImpl) WriteVarInt(value int32) error {
+func (p *bufReadWriterImpl) WriteVarInt(value int32) error {
 	for {
 		if (value & ^varIntSegmentBits) == 0 {
 			return p.Write([]byte{uint8(value)})
@@ -212,7 +237,7 @@ func (p *bufferReadWriterImpl) WriteVarInt(value int32) error {
 	}
 }
 
-func (p *bufferReadWriterImpl) ReadString() (string, error) {
+func (p *bufReadWriterImpl) ReadString() (string, error) {
 	length, err := p.ReadVarInt()
 	if err != nil {
 		return "", err
@@ -226,7 +251,7 @@ func (p *bufferReadWriterImpl) ReadString() (string, error) {
 	return string(b), nil
 }
 
-func (p *bufferReadWriterImpl) WriteString(s string) error {
+func (p *bufReadWriterImpl) WriteString(s string) error {
 	err := p.WriteVarInt(int32(len(s)))
 	if err != nil {
 		return err
@@ -234,7 +259,7 @@ func (p *bufferReadWriterImpl) WriteString(s string) error {
 	return p.Write([]byte(s))
 }
 
-func (p *bufferReadWriterImpl) ReadUTF16BE() (string, error) {
+func (p *bufReadWriterImpl) ReadUTF16BE() (string, error) {
 	strLen, err := p.ReadInt16()
 	if err != nil {
 		return "", err
@@ -258,7 +283,7 @@ func (p *bufferReadWriterImpl) ReadUTF16BE() (string, error) {
 	return string(utf16.Decode(u16s)), nil
 }
 
-func (p *bufferReadWriterImpl) WriteUTF16BE(s string) error {
+func (p *bufReadWriterImpl) WriteUTF16BE(s string) error {
 	u16s := utf16.Encode([]rune(s))
 
 	var buf bytes.Buffer

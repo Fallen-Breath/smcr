@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"github.com/Fallen-Breath/smcr/internal/config"
+	"github.com/Fallen-Breath/smcr/internal/constants"
 	"github.com/Fallen-Breath/smcr/internal/logging"
 	"github.com/Fallen-Breath/smcr/internal/router"
 	log "github.com/sirupsen/logrus"
@@ -29,7 +30,7 @@ func main() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Infof("SMCR starting")
+	log.Infof("SMCR v%s starting", constants.Version)
 	r := router.NewMinecraftRouter(cfg)
 	go r.Run()
 

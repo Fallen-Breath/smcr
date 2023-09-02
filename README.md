@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/github/license/Fallen-Breath/smcr.svg)](http://www.gnu.org/licenses/gpl-3.0.html)
 [![Issues](https://img.shields.io/github/issues/Fallen-Breath/smcr.svg)](https://github.com/Fallen-Breath/smcr/issues)
-[![Docker](https://img.shields.io/docker/v/fallenbreath/smcr/latest)](https://github.com/Fallen-Breath/smcr)
+[![Docker](https://img.shields.io/docker/v/fallenbreath/smcr/latest)](https://hub.docker.com/r/fallenbreath/smcr)
 
 A simple Minecraft router that routes using the server address in the [handshake](https://wiki.vg/Protocol#Handshake) packet
 

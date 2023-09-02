@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/Fallen-Breath/smcr/internal/config"
 	"github.com/Fallen-Breath/smcr/internal/constants"
 	"github.com/Fallen-Breath/smcr/internal/logging"
@@ -15,12 +16,17 @@ import (
 func main() {
 	logging.InitLog()
 
-	flagConfig := flag.String("c", "config.yml", "Path to the config yaml file. Default: config.yml")
-	flagHelp := flag.Bool("h", false, "Show help")
+	flagConfig := flag.String("c", "config.yml", "Path to the config yaml file")
+	flagShowHelp := flag.Bool("h", false, "Show help and exit")
+	flagShowVersion := flag.Bool("v", false, "Show version and exit")
 	flag.Parse()
 
-	if *flagHelp {
+	if *flagShowHelp {
 		flag.Usage()
+		return
+	}
+	if *flagShowVersion {
+		fmt.Printf("SMCR v%s\n", constants.Version)
 		return
 	}
 

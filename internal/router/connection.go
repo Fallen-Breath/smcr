@@ -1,7 +1,6 @@
 package router
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/Fallen-Breath/smcr/internal/config"
 	"github.com/Fallen-Breath/smcr/internal/dns"
@@ -22,7 +21,7 @@ type ConnectionHandler struct {
 	logger     *log.Entry
 }
 
-const handshakeMaxTimeWait = 20 * time.Second
+const handshakeMaxTimeWait = 30 * time.Second
 
 func NewConnectionHandler(id int, cfg *config.Config, clientConn net.Conn) *ConnectionHandler {
 	h := &ConnectionHandler{
@@ -53,53 +52,72 @@ func (h *ConnectionHandler) handleConnection() {
 	// ============================== Read Handshake Packet ==============================
 
 	handshakeTimeout := false
-	timer := time.AfterFunc(handshakeMaxTimeWait, func() {
+	deadlineTimer := time.AfterFunc(handshakeMaxTimeWait, func() {
 		h.logger.Errorf("Wait for handshake packet times out (%.0fs), closing connection", handshakeMaxTimeWait.Seconds())
 		handshakeTimeout = true
 		once.Do(closeClientConn)
 	})
-	connReadWriter := protocol.NewPacketReadWriter(h.clientConn)
+	connReadWriter := protocol.NewBufferReadWriter(h.clientConn)
 	handshakePacket, err := protocol.ReadHandshakePacket(connReadWriter)
-	timer.Stop()
+	deadlineTimer.Stop()
 	if err != nil {
 		if !handshakeTimeout {
 			h.logger.Errorf("Failed to read handshake packet from client: %v", err)
 		}
 		return
 	}
+	h.logger.Debugf("Received handshake packet (legacy=%v) %+v", handshakePacket.IsLegacy(), handshakePacket)
+
+	trySendMessage := func(messageJson string) {
+		if pkg, ok := handshakePacket.(*protocol.HandshakePacket); ok {
+			if pkg.NextState == protocol.HandshakeNextStateLogin && len(messageJson) > 0 {
+				disconnectPacket := protocol.DisconnectPacket{Reason: messageJson}
+				err := protocol.WritePacket(connReadWriter, &disconnectPacket)
+				if err != nil {
+					h.logger.Errorf("Failed to send disconnect packet to client: %v", err)
+				}
+				h.logger.Debugf("Sent disconnect packet %+v", disconnectPacket)
+			}
+		}
+	}
 
 	// ============================== Do Route ==============================
 
-	h.logger.Infof("Address in handshake packet: %s:%d", handshakePacket.Hostname, handshakePacket.Port)
-	route := h.RouteFor(handshakePacket.Hostname, handshakePacket.Port)
+	rawHostname := *handshakePacket.GetHostname()
+	port := *handshakePacket.GetPort()
+	hostname := rawHostname
+	hostname = strings.Split(hostname, "\x00")[0] // forge client stuff
+	hostnameTail := rawHostname[len(hostname):]
+
+	route := h.RouteFor(hostname, port)
+	msg := "Address in handshake packet"
+	if handshakePacket.IsLegacy() {
+		msg += " (legacy)"
+	}
+	msg += fmt.Sprintf(": %s:%d", hostname, port)
+	if len(hostnameTail) > 0 {
+		msg += fmt.Sprintf(", hostname tail: '%s'", hostnameTail)
+	}
+	h.logger.Infof(msg)
+
 	if route == nil {
-		h.logger.Infof("Cannot found any endpoint for address %+v, closing connection", h.clientConn.RemoteAddr())
+		h.logger.Infof("Cannot found any endpoint for %s:%d, closing connection", hostname, port)
 		return
 	}
 
-	h.logger.Infof("Selected route '%s'", route.Name)
+	h.logger.Infof("Selected route '%s' with action '%s'", route.Name, route.Action)
 
-	if len(route.Mimic) > 0 {
-		host, portStr, err := net.SplitHostPort(route.Mimic)
-		if err == nil {
-			port, err := strconv.Atoi(portStr)
-			if err == nil {
-				handshakePacket.Hostname = host
-				handshakePacket.Port = uint16(port)
-				h.logger.Infof("Modified address in handshake packet to %s:%d", host, port)
-			} else {
-				h.logger.Errorf("Invalid port %s: %v", portStr, err)
-			}
-		} else {
-			h.logger.Errorf("Invalid mimic address %s: %v", route.Mimic, err)
-		}
+	if route.Action == config.Reject {
+		h.logger.Infof("Reject connection by route config")
+		trySendMessage(route.GetRejectMessageJson())
+		return
 	}
 
 	// ============================== Connect to Target ==============================
 
 	target, err := h.resolveTarget(route)
 	if err != nil {
-		h.logger.Errorf("Failed to resolve target for route %s: %v", route.Name, err)
+		h.logger.Errorf("Failed to resolve target for route '%s': %v", route.Name, err)
 		return
 	}
 
@@ -109,28 +127,30 @@ func (h *ConnectionHandler) handleConnection() {
 	h.logger.Debugf("Dial cost %dms", time.Now().Sub(t).Milliseconds())
 	if err != nil {
 		h.logger.Errorf("Dial to target %s failed: %v", target, err)
-		if handshakePacket.NextState == protocol.HandshakeNextStateLogin && len(route.TimeoutMessage) > 0 {
-			var data string
-			if json.Unmarshal([]byte(route.TimeoutMessage), &json.RawMessage{}) == nil { // it's already a valid json
-				data = route.TimeoutMessage
-			} else { // not a valid json, treat as plain string
-				b, _ := json.Marshal(route.TimeoutMessage)
-				data = string(b)
-			}
-			disconnectPacket := protocol.DisconnectPacket{Reason: data}
-			err := protocol.WritePacket(connReadWriter, &disconnectPacket)
-			if err != nil {
-				h.logger.Errorf("Failed to send disconnect packet to client: %v", err)
-			}
-			h.logger.Debugf("Sent disconnect packet %+v", disconnectPacket)
-		}
+		trySendMessage(route.GetDialFailMessageJson())
 		return
 	}
 	defer h.closeConnection("target", targetConn)
 
 	// ============================== Write Handshake Packet ==============================
 
-	if err := protocol.WritePacket(protocol.NewPacketReadWriter(targetConn), handshakePacket); err != nil {
+	if len(route.Mimic) > 0 {
+		host, portStr, err := net.SplitHostPort(route.Mimic)
+		if err == nil {
+			port, err := strconv.Atoi(portStr)
+			if err == nil {
+				*handshakePacket.GetHostname() = host + hostnameTail
+				*handshakePacket.GetPort() = uint16(port)
+				h.logger.Infof("Modified address in handshake packet to %s:%d", host, port)
+			} else {
+				h.logger.Errorf("Invalid port %s: %v", portStr, err)
+			}
+		} else {
+			h.logger.Errorf("Invalid mimic address %s: %v", route.Mimic, err)
+		}
+	}
+
+	if err := protocol.WritePacket(protocol.NewBufferReadWriter(targetConn), handshakePacket); err != nil {
 		h.logger.Errorf("Failed to write handshake packet to target: %v", err)
 		return
 	}
@@ -165,15 +185,16 @@ func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
 
 // RouteFor might return nullable
 func (h *ConnectionHandler) RouteFor(hostname string, port uint16) *config.Route {
+	hostname = strings.TrimRight(hostname, ".") // domain name might have a tailing ".", remove that
 	address := fmt.Sprintf("%s:%d", hostname, port)
 	routeMap := h.config.GetRouteMap()
 
-	if route, ok := routeMap[address]; ok {
-		h.logger.Debugf("Selected route %s for address %s", route.Name, address)
+	if route, ok := routeMap[strings.ToLower(address)]; ok {
+		h.logger.Debugf("Selected route '%s' for address %s", route.Name, address)
 		return route
 	}
-	if route, ok := routeMap[hostname]; ok {
-		h.logger.Debugf("Selected route %s for hostname %s", route.Name, address)
+	if route, ok := routeMap[strings.ToLower(hostname)]; ok {
+		h.logger.Debugf("Selected route '%s' for hostname %s", route.Name, address)
 		return route
 	}
 

@@ -1,25 +1,44 @@
 package protocol
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"unicode/utf16"
 )
 
 type BufferReader interface {
 	GetReadLen() int
+	Peek(n int) ([]byte, error)
 	Read(n int) ([]byte, error)
-	ReadUnsignedShort() (uint16, error)
+
+	ReadUInt8() (uint8, error)   // Unsigned byte
+	ReadUInt16() (uint16, error) // Unsigned Short
+	ReadInt16() (int16, error)   // Short
+	ReadUInt32() (uint32, error) // Unsigned Int
+	ReadInt32() (int32, error)   // Int
+
 	ReadVarInt() (int32, error)
 	ReadString() (string, error)
+	ReadUTF16BE() (string, error)
 }
 
 type BufferWriter interface {
 	GetWriteLen() int
+	Flush() error
 	Write(b []byte) error
+
+	WriteUInt8(value uint8) error   // Unsigned byte
+	WriteUInt16(value uint16) error // Unsigned Short
+	WriteInt16(value int16) error   // Short
+	WriteUInt32(value uint32) error // Unsigned Int
+	WriteInt32(value int32) error   // Int
+
 	WriteVarInt(value int32) error
-	WriteUnsignedShort(value uint16) error
 	WriteString(s string) error
+	WriteUTF16BE(s string) error
 }
 
 type BufferReadWriter interface {
@@ -28,16 +47,16 @@ type BufferReadWriter interface {
 }
 
 type bufferReadWriterImpl struct {
-	buf      io.ReadWriter
+	buf      *bufio.ReadWriter
 	writeLen int
 	readLen  int
 }
 
 var _ BufferReadWriter = &bufferReadWriterImpl{}
 
-func NewPacketReadWriter(buf io.ReadWriter) BufferReadWriter {
+func NewBufferReadWriter(buf io.ReadWriter) BufferReadWriter {
 	return &bufferReadWriterImpl{
-		buf:      buf,
+		buf:      bufio.NewReadWriter(bufio.NewReader(buf), bufio.NewWriter(buf)),
 		readLen:  0,
 		writeLen: 0,
 	}
@@ -56,6 +75,15 @@ func (p *bufferReadWriterImpl) GetWriteLen() int {
 	return p.writeLen
 }
 
+func (p *bufferReadWriterImpl) Peek(n int) ([]byte, error) {
+	return p.buf.Peek(n)
+}
+
+func (p *bufferReadWriterImpl) Flush() error {
+	return p.buf.Flush()
+}
+
+// If the underlying buf is a bytes.Buffer, make sure to Flush before Reading
 func (p *bufferReadWriterImpl) Read(n int) ([]byte, error) {
 	b := make([]byte, n)
 	n, err := p.buf.Read(b)
@@ -81,7 +109,19 @@ func (p *bufferReadWriterImpl) Write(b []byte) error {
 	return nil
 }
 
-func (p *bufferReadWriterImpl) ReadUnsignedShort() (uint16, error) {
+func (p *bufferReadWriterImpl) ReadUInt8() (uint8, error) {
+	b, err := p.Read(1)
+	if err != nil {
+		return 0, err
+	}
+	return b[0], nil
+}
+
+func (p *bufferReadWriterImpl) WriteUInt8(value uint8) error {
+	return p.Write([]byte{value})
+}
+
+func (p *bufferReadWriterImpl) ReadUInt16() (uint16, error) {
 	b, err := p.Read(2)
 	if err != nil {
 		return 0, err
@@ -89,10 +129,48 @@ func (p *bufferReadWriterImpl) ReadUnsignedShort() (uint16, error) {
 	return binary.BigEndian.Uint16(b), nil
 }
 
-func (p *bufferReadWriterImpl) WriteUnsignedShort(value uint16) error {
+func (p *bufferReadWriterImpl) WriteUInt16(value uint16) error {
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, value)
 	return p.Write(b)
+}
+
+func (p *bufferReadWriterImpl) ReadInt16() (int16, error) {
+	value, err := p.ReadUInt16()
+	if err != nil {
+		return 0, err
+	}
+	return int16(value), err
+}
+
+func (p *bufferReadWriterImpl) WriteInt16(value int16) error {
+	return p.WriteUInt16(uint16(value))
+}
+
+func (p *bufferReadWriterImpl) ReadUInt32() (uint32, error) {
+	b, err := p.Read(4)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint32(b), nil
+}
+
+func (p *bufferReadWriterImpl) WriteUInt32(value uint32) error {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, value)
+	return p.Write(b)
+}
+
+func (p *bufferReadWriterImpl) ReadInt32() (int32, error) {
+	value, err := p.ReadUInt32()
+	if err != nil {
+		return 0, err
+	}
+	return int32(value), err
+}
+
+func (p *bufferReadWriterImpl) WriteInt32(value int32) error {
+	return p.WriteUInt32(uint32(value))
 }
 
 func (p *bufferReadWriterImpl) ReadVarInt() (int32, error) {
@@ -152,4 +230,48 @@ func (p *bufferReadWriterImpl) WriteString(s string) error {
 		return err
 	}
 	return p.Write([]byte(s))
+}
+
+func (p *bufferReadWriterImpl) ReadUTF16BE() (string, error) {
+	strLen, err := p.ReadInt16()
+	if err != nil {
+		return "", err
+	}
+
+	buf, err := p.Read(int(strLen * 2))
+	if err != nil {
+		return "", err
+	}
+
+	var u16s []uint16
+	r := bytes.NewReader(buf)
+	for r.Len() > 0 {
+		var u16 uint16
+		if err := binary.Read(r, binary.BigEndian, &u16); err != nil {
+			return "", err
+		}
+		u16s = append(u16s, u16)
+	}
+
+	return string(utf16.Decode(u16s)), nil
+}
+
+func (p *bufferReadWriterImpl) WriteUTF16BE(s string) error {
+	u16s := utf16.Encode([]rune(s))
+
+	var buf bytes.Buffer
+	for _, u16 := range u16s {
+		if err := binary.Write(&buf, binary.BigEndian, u16); err != nil {
+			return err
+		}
+	}
+
+	b := buf.Bytes()
+	if err := p.WriteInt16(int16(len(b))); err != nil {
+		return err
+	}
+	if err := p.Write(b); err != nil {
+		return err
+	}
+	return nil
 }

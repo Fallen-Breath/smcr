@@ -1,11 +1,23 @@
+# see https://github.com/Fallen-Breath/smcr
 listen: 0.0.0.0:7777
-log_level: info
+debug: false
+routes:
+  # regular
+  - name: foo
+    matches:
+      - localhost:7777
+    target: 127.0.0.1:25565
+
+  - name: bar
+    matches:
+      - 127.0.0.1:7777
+      - mc.example.com
+    target: 127.0.0.1:25566
+    mimic: mc.example.com:25566
+
+  - name: default
+    action: reject
+    # reject_message: oops
+
 srv_lookup_timeout: 3s
 default_connect_timeout: 3s
-routes:
-  - name: default
-    matches: [localhost:7777]
-    target: 127.0.0.1:25565
-    # mimic: foobar:25565
-    # timeout: 1s
-    # timeout_message: oops

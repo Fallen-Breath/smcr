@@ -2,8 +2,8 @@ package protocol
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
+	"math"
 )
 
 const (
@@ -12,102 +12,25 @@ const (
 
 	HandshakeNextStateStatus = 1
 	HandshakeNextStateLogin  = 2
+
+	legacyHandshakeMagic = 0xFE
 )
-
-func ReadHandshakePacket(reader BufferReader) (*HandshakePacket, error) {
-	packet, err := readPacket(
-		reader,
-		func(packetId int32) (Packet, error) {
-			if packetId == HandShakePacketId {
-				return &HandshakePacket{}, nil
-			}
-			return nil, fmt.Errorf("unexpected packet ID %d, should be handshake packet ID %d", packetId, HandShakePacketId)
-		},
-		func(packetLen int32) error {
-			if packetLen == 254 {
-				return errors.New("discard legacy server ping")
-			}
-			return nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	return packet.(*HandshakePacket), nil
-}
-
-//goland:noinspection GoUnusedExportedFunction
-func ReadPacket(reader BufferReader, packetFactory func(int32) (Packet, error)) (Packet, error) {
-	return readPacket(reader, packetFactory, nil)
-}
-
-func readPacket(reader BufferReader, packetFactory func(int32) (Packet, error), packetLenChecker func(int32) error) (Packet, error) {
-	packetLen, err := reader.ReadVarInt()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read packet length: %v", err)
-	}
-
-	if packetLenChecker != nil {
-		if err := packetLenChecker(packetLen); err != nil {
-			return nil, err
-		}
-	}
-
-	packetBody, err := reader.Read(int(packetLen))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read packet body: %v", err)
-	}
-	bodyReader := NewPacketReadWriter(bytes.NewBuffer(packetBody[:]))
-
-	packetId, err := bodyReader.ReadVarInt()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read packet ID: %v", err)
-	}
-
-	packet, err := packetFactory(packetId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create packet for ID %d: %v", packetId, err)
-	}
-
-	if err := packet.ReadFrom(bodyReader); err != nil {
-		return nil, fmt.Errorf("failed to deserialize packet fields: %v", err)
-	}
-	if bodyReader.GetReadLen() != int(packetLen) {
-		return nil, fmt.Errorf("packet field read len mismatched: total len %d, read len %d", packetLen, bodyReader.GetReadLen())
-	}
-
-	return packet, nil
-}
-
-func WritePacket(writer BufferWriter, packet Packet) error {
-	bodyWriter := NewPacketReadWriter(bytes.NewBuffer([]byte{}))
-	if err := bodyWriter.WriteVarInt(packet.GetId()); err != nil {
-		return fmt.Errorf("failed to serialize packet ID: %v", err)
-	}
-	if err := packet.WriteTo(bodyWriter); err != nil {
-		return fmt.Errorf("failed to serialize packet fields: %v", err)
-	}
-
-	packetLen := bodyWriter.GetWriteLen()
-	packetBody, err := bodyWriter.Read(packetLen)
-	if err != nil {
-		return fmt.Errorf("failed to extract packet body: %v", err)
-	}
-
-	if err := writer.WriteVarInt(int32(packetLen)); err != nil {
-		return fmt.Errorf("failed to write packet length: %v", err)
-	}
-	if err := writer.Write(packetBody); err != nil {
-		return fmt.Errorf("failed to write packet body: %v", err)
-	}
-
-	return nil
-}
 
 type Packet interface {
 	ReadFrom(reader BufferReader) error
 	WriteTo(writer BufferWriter) error
+}
+
+type ModernPacket interface {
+	Packet
 	GetId() int32
+}
+
+type IHandshakePacket interface {
+	Packet
+	IsLegacy() bool
+	GetHostname() *string
+	GetPort() *uint16
 }
 
 // HandshakePacket is in handshake state, C2S
@@ -118,7 +41,18 @@ type HandshakePacket struct {
 	NextState int32
 }
 
-var _ Packet = &HandshakePacket{}
+var _ ModernPacket = &HandshakePacket{}
+var _ IHandshakePacket = &HandshakePacket{}
+
+func (p *HandshakePacket) IsLegacy() bool {
+	return false
+}
+func (p *HandshakePacket) GetHostname() *string {
+	return &p.Hostname
+}
+func (p *HandshakePacket) GetPort() *uint16 {
+	return &p.Port
+}
 
 func (p *HandshakePacket) GetId() int32 {
 	return HandShakePacketId
@@ -132,7 +66,7 @@ func (p *HandshakePacket) ReadFrom(reader BufferReader) error {
 	if p.Hostname, err = reader.ReadString(); err != nil {
 		return fmt.Errorf("failed to read handshake address: %v", err)
 	}
-	if p.Port, err = reader.ReadUnsignedShort(); err != nil {
+	if p.Port, err = reader.ReadUInt16(); err != nil {
 		return fmt.Errorf("failed to read handshake port: %v", err)
 	}
 	if p.NextState, err = reader.ReadVarInt(); err != nil {
@@ -148,11 +82,103 @@ func (p *HandshakePacket) WriteTo(writer BufferWriter) error {
 	if err := writer.WriteString(p.Hostname); err != nil {
 		return fmt.Errorf("failed to write handshake address: %v", err)
 	}
-	if err := writer.WriteUnsignedShort(p.Port); err != nil {
+	if err := writer.WriteUInt16(p.Port); err != nil {
 		return fmt.Errorf("failed to write handshake port: %v", err)
 	}
 	if err := writer.WriteVarInt(p.NextState); err != nil {
 		return fmt.Errorf("failed to write handshake next state: %v", err)
+	}
+	return nil
+}
+
+// LegacyServerListPingPacket is in handshake state, C2S
+// see https://wiki.vg/Server_List_Ping#1.6
+type LegacyServerListPingPacket struct {
+	Header   []byte // the first 27 bytes of whatever things. see legacyServerPingHead
+	Protocol uint8
+	Hostname string
+	Port     uint16
+}
+
+var legacyServerPingHead = []byte{
+	0xFE,
+	0x01,
+	0xFA,
+	0x00, 0x0B,
+	0x00, 0x4D, 0x00, 0x43, 0x00, 0x7C, 0x00, 0x50, 0x00, 0x69, 0x00, 0x6E, 0x00, 0x67, 0x00, 0x48, 0x00, 0x6F, 0x00, 0x73, 0x00, 0x74,
+}
+
+var _ IHandshakePacket = &LegacyServerListPingPacket{}
+
+func (p *LegacyServerListPingPacket) IsLegacy() bool {
+	return true
+}
+func (p *LegacyServerListPingPacket) GetHostname() *string {
+	return &p.Hostname
+}
+func (p *LegacyServerListPingPacket) GetPort() *uint16 {
+	return &p.Port
+}
+
+func (p *LegacyServerListPingPacket) ReadFrom(reader BufferReader) error {
+	var err error
+	if p.Header, err = reader.Read(len(legacyServerPingHead)); err != nil {
+		return fmt.Errorf("failed to read header: %v", err)
+	}
+	if !bytes.Equal(legacyServerPingHead, p.Header) {
+		return fmt.Errorf("invalid header, expected %v, found %v", legacyServerPingHead, p.Header)
+	}
+
+	if _, err := reader.ReadInt16(); err != nil {
+		return fmt.Errorf("failed to read remaining len: %v", err)
+	}
+	if p.Protocol, err = reader.ReadUInt8(); err != nil {
+		return fmt.Errorf("failed to read protocol: %v", err)
+	}
+	if p.Hostname, err = reader.ReadUTF16BE(); err != nil {
+		return fmt.Errorf("failed to read hostname: %v", err)
+	}
+	port, err := reader.ReadInt32()
+	if err != nil {
+		return fmt.Errorf("failed to read port: %v", err)
+	}
+	if port < 0 || port > math.MaxUint16 {
+		return fmt.Errorf("port value %d out of range", port)
+	}
+	p.Port = uint16(port)
+
+	return nil
+}
+
+func (p *LegacyServerListPingPacket) WriteTo(writer BufferWriter) error {
+	if err := writer.Write(p.Header); err != nil {
+		return fmt.Errorf("failed to write header: %v", err)
+	}
+
+	w := NewBufferReadWriter(&bytes.Buffer{})
+	if err := w.WriteUInt8(p.Protocol); err != nil {
+		return fmt.Errorf("failed to write protocol: %v", err)
+	}
+	if err := w.WriteUTF16BE(p.Hostname); err != nil {
+		return fmt.Errorf("failed to write hostname: %v", err)
+	}
+	if err := w.WriteInt32(int32(p.Port)); err != nil {
+		return fmt.Errorf("failed to write port: %v", err)
+	}
+
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("failed to flush buffer: %v", err)
+	}
+	b, err := w.Read(w.GetWriteLen())
+	if err != nil {
+		return fmt.Errorf("failed to extract buffer: %v", err)
+	}
+
+	if err := writer.WriteInt16(int16(len(b))); err != nil {
+		return fmt.Errorf("failed to write reset length: %v", err)
+	}
+	if err := writer.Write(b); err != nil {
+		return fmt.Errorf("failed to write reset buf: %v", err)
 	}
 	return nil
 }
@@ -162,7 +188,7 @@ type DisconnectPacket struct {
 	Reason string
 }
 
-var _ Packet = &DisconnectPacket{}
+var _ ModernPacket = &DisconnectPacket{}
 
 func (p *DisconnectPacket) GetId() int32 {
 	return DisconnectPacketId

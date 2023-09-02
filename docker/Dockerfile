@@ -2,10 +2,13 @@ FROM golang:1.20 as builder
 
 WORKDIR /build
 
+ARG GOPROXY
+ENV GOPROXY=$GOPROXY
+
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY . ./
+COPY ./ ./
 RUN CGO_ENABLED=0 go build -o smcr cmd/smcr/smcr.go
 
 FROM alpine:latest

@@ -68,7 +68,7 @@ func (h *ConnectionHandler) handleConnection() {
 	}
 	h.logger.Debugf("Received handshake packet (legacy=%v) %+v", handshakePacket.IsLegacy(), handshakePacket)
 
-	trySendMessage := func(messageJson string) {
+	disconnectWithMessage := func(messageJson string) {
 		if pkg, ok := handshakePacket.(*protocol.HandshakePacket); ok {
 			if pkg.NextState == protocol.HandshakeNextStateLogin && len(messageJson) > 0 {
 				disconnectPacket := protocol.DisconnectPacket{Reason: messageJson}
@@ -77,8 +77,13 @@ func (h *ConnectionHandler) handleConnection() {
 					h.logger.Errorf("Failed to send disconnect packet to client: %v", err)
 				}
 				h.logger.Debugf("Sent disconnect packet %+v", disconnectPacket)
+				// flush the tcp write buffer
+				if tcpConn, ok := h.clientConn.(*net.TCPConn); ok {
+					_ = tcpConn.CloseWrite()
+				}
 			}
 		}
+		once.Do(closeClientConn)
 	}
 
 	// ============================== Do Route ==============================
@@ -109,7 +114,7 @@ func (h *ConnectionHandler) handleConnection() {
 
 	if route.Action == config.Reject {
 		h.logger.Infof("Reject connection by route config")
-		trySendMessage(route.GetRejectMessageJson())
+		disconnectWithMessage(route.GetRejectMessageJson())
 		return
 	}
 
@@ -127,7 +132,7 @@ func (h *ConnectionHandler) handleConnection() {
 	h.logger.Debugf("Dial cost %dms", time.Now().Sub(t).Milliseconds())
 	if err != nil {
 		h.logger.Errorf("Dial to target %s failed: %v", target, err)
-		trySendMessage(route.GetDialFailMessageJson())
+		disconnectWithMessage(route.GetDialFailMessageJson())
 		return
 	}
 	defer h.closeConnection("target", targetConn)

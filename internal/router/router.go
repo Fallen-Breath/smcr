@@ -2,6 +2,7 @@ package router
 
 import (
 	"github.com/Fallen-Breath/smcr/internal/config"
+	"github.com/pires/go-proxyproto"
 	log "github.com/sirupsen/logrus"
 	"net"
 	"sync"
@@ -26,6 +27,16 @@ func (r *MinecraftRouter) Run() {
 		log.Fatalf("Failed to listen on %s: %v", r.config.Listen, err)
 	}
 	log.Infof("Listening on %s", r.config.Listen)
+
+	if r.config.ProxyProtocol {
+		listener = &proxyproto.Listener{
+			Listener: listener,
+			Policy: func(upstream net.Addr) (proxyproto.Policy, error) {
+				return proxyproto.REQUIRE, nil
+			},
+		}
+		log.Infof("ProxyProtocol listener enabled")
+	}
 
 	go func() {
 		<-r.stopCh

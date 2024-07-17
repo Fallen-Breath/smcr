@@ -29,6 +29,9 @@ type Route struct {
 	Timeout         time.Duration `yaml:"timeout_ms,omitempty"`        // optional, default DefaultConnectTimeout
 	DialFailMessage string        `yaml:"dial_fail_message,omitempty"` // if given, send this to the client if dial failed
 
+	// haproxy protocol
+	ProxyProtocol int `yaml:"proxy_protocol,omitempty"` // if given, send proxy protocol header to the target server using given version (1 or 2)
+
 	// reject action
 	RejectMessage string `yaml:"reject_message,omitempty"` // if given, disconnect the client with the given message, so client knows what happens
 
@@ -41,8 +44,9 @@ type Config struct {
 	Listen                string        `yaml:"listen"`
 	Debug                 bool          `yaml:"debug"`
 	Routes                []Route       `yaml:"routes"`
-	DefaultConnectTimeout time.Duration `yaml:"default_connect_timeout"` // optional, default 3s
-	SrvLookupTimeout      time.Duration `yaml:"srv_lookup_timeout"`      // optional, default 3s
+	DefaultConnectTimeout time.Duration `yaml:"default_connect_timeout"`  // optional, default 3s
+	SrvLookupTimeout      time.Duration `yaml:"srv_lookup_timeout"`       // optional, default 3s
+	ProxyProtocol         bool          `yaml:"proxy_protocol,omitempty"` // if client can send proxy protocol header to smcr. if true, PP header will be required
 
 	routeMap     map[string]*Route `yaml:"-"` // match_addr (lowered case) -> route
 	defaultRoute *Route            `yaml:"-"`
@@ -117,6 +121,9 @@ func (c *Config) Init() {
 			// ok
 		default:
 			log.Fatalf("unknown route acion %s", route.Action)
+		}
+		if !(0 <= route.ProxyProtocol && route.ProxyProtocol <= 2) {
+			log.Fatalf("routes[%d] declares invalid proxy protocol version %d, should be 1 or 2", i, route.ProxyProtocol)
 		}
 	}
 

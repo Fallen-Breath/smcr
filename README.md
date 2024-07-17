@@ -100,6 +100,16 @@ See section [timeout format section](#timeout-format) for more details on its fo
 default_connect_timeout: 3s
 ```
 
+#### proxy_protocol
+
+Enable support for accepting proxy protocol from client
+
+When enabled, client connections are required to send a proxy protocol header (in either version 1 or 2) to smcr
+
+```yaml
+proxy_protocol: false
+```
+
 ### Route
 
 When received a client connection, SMCR will try to read the [handshake packet](https://wiki.vg/Protocol#Handshake) from the client and extract the hostname + port from it.
@@ -159,7 +169,7 @@ If not given, SMCR will just close the connection directly
 See [mc message section](#mc-message-format) for more details on its format
 
 ```yaml
-reject_message: true
+reject_message: 404 not found
 ```
 
 #### target
@@ -201,6 +211,30 @@ See section [timeout format section](#timeout-format) for more details on its fo
 
 ```yaml
 timeout: 5s
+```
+
+#### dial_fail_message
+
+*Available when `reject` is `false`*
+
+Optional option, the message to be sent back to the client if smcr fails to connects to the target server
+
+If not given, SMCR will just close the connection directly
+
+See [mc message section](#mc-message-format) for more details on its format
+
+```yaml
+dial_fail_message: server down?
+```
+
+#### proxy_protocol
+
+*Available when `reject` is `false`*
+
+If given, send proxy protocol header to the target server using given version (1 or 2)
+
+```yaml
+proxy_protocol: 2  # using version 2
 ```
 
 ### Default route

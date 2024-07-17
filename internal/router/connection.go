@@ -5,6 +5,7 @@ import (
 	"github.com/Fallen-Breath/smcr/internal/config"
 	"github.com/Fallen-Breath/smcr/internal/dns"
 	"github.com/Fallen-Breath/smcr/internal/protocol"
+	"github.com/pires/go-proxyproto"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net"
@@ -137,7 +138,41 @@ func (h *ConnectionHandler) handleConnection() {
 	}
 	defer h.closeConnection("target", targetConn)
 
-	// ============================== Write Handshake Packet ==============================
+	// ============================== Write Handshake Packet etc. ==============================
+
+	if 1 <= route.ProxyProtocol || route.ProxyProtocol <= 2 {
+		isIpv4 := func(addr net.Addr) bool {
+			tcpAddr, err := net.ResolveTCPAddr("tcp", addr.String())
+			if err != nil {
+				log.Fatalf("Failed to resolve tcp address %s: %v", addr.String(), err)
+			}
+			return tcpAddr.IP.To4() != nil
+		}
+		clientAddr := h.clientConn.RemoteAddr()
+		targetAddr := targetConn.RemoteAddr()
+		clientIs4 := isIpv4(clientAddr)
+		targetIs4 := isIpv4(targetAddr)
+
+		var transportProtocol proxyproto.AddressFamilyAndProtocol
+		if clientIs4 && targetIs4 {
+			transportProtocol = proxyproto.TCPv4
+		} else if !clientIs4 && !targetIs4 {
+			transportProtocol = proxyproto.TCPv6
+		} else {
+			h.logger.Errorf("Mixed use of IPv4 and IPv6, cannot create a HAProxy protocol header. clientAddr: %s, targetAddr: %s", clientAddr, targetAddr)
+		}
+		proxyProtocolHeader := &proxyproto.Header{
+			Version:           byte(route.ProxyProtocol),
+			Command:           proxyproto.PROXY,
+			TransportProtocol: transportProtocol,
+			SourceAddr:        clientAddr,
+			DestinationAddr:   targetAddr,
+		}
+		if _, err := proxyProtocolHeader.WriteTo(targetConn); err != nil {
+			h.logger.Errorf("Failed to write proxy protocol header to target: %v", err)
+			return
+		}
+	}
 
 	if len(route.Mimic) > 0 {
 		host, portStr, err := net.SplitHostPort(route.Mimic)

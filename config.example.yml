@@ -17,6 +17,7 @@ routes:
     mimic: mc.example.com:25566
     timeout: 1s
     dial_fail_message: oops, the server might be down
+    proxy_protocol: 2  # send a haproxy protocol version 2 header to the server
 
   # An example route with the reject action
   - name: baz
@@ -31,3 +32,4 @@ routes:
 
 srv_lookup_timeout: 3s
 default_connect_timeout: 3s
+proxy_protocol: false

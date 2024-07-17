@@ -38,9 +38,49 @@ Prepare your [config](#config) file, then you can start SMCR with the following 
 ./smcr -c /path/to/config.yml
 ```
 
-## Config
+### Config Examples
 
 An example config file with all available options can be found [here](config.example.yml)
+
+Here's some useful config examples for lazyman
+
+A basic connection forwarder that to ensure the client connects with `example.com`
+
+```yaml
+listen: 0.0.0.0:7777
+routes:
+  - name: example
+    matches:
+      - example.com
+    target: 127.0.0.1:25565
+```
+
+A connection forwarder that modifies the server address in the handshake packet from whatever value to `mc.example.com:25565`.
+Notes that the only route in the config has the name `default`
+
+```yaml
+listen: 0.0.0.0:7777
+routes:
+  - name: default
+    target: server.example.com:20001
+    mimic: mc.example.com:25565
+```
+
+A connection forwarder that has a server address check, and will append a proxy protocol header to the downstream target server
+
+```yaml
+listen: 0.0.0.0:7777
+routes:
+  - name: example
+    matches:
+      - 127.0.0.1
+      - example.com:20001
+    target: 127.0.0.1:25577
+    mimic: mc.example.com:25565
+    proxy_protocol: 2
+```
+
+## Config Entries
 
 Here's a detailed explanation of all options in the config file
 

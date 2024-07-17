@@ -31,7 +31,7 @@ There are some similar projects that provides better support on metrics / high a
 
 ## Usages
 
-Prepare your [config](#config) file, then you can start SMCR with the following command
+Prepare your config file, then you can start SMCR with the following command
 
 ```bash
 ./smcr  # use ./config.yml as the configuration
@@ -53,6 +53,27 @@ routes:
     matches:
       - example.com
     target: 127.0.0.1:25565
+```
+
+A config with more routes defined
+
+```yaml
+listen: 0.0.0.0:7777
+routes:
+  - name: svr1
+    matches:
+      - svr1.example.com
+    target: 127.0.0.1:10000
+    
+  - name: svr2
+    matches:
+      - svr2.example.com
+    target: 127.0.0.1:20000
+
+  - name: svr3
+    matches:
+      - svr3.example.com
+    target: 127.0.0.1:30000
 ```
 
 A connection forwarder that modifies the server address in the handshake packet from whatever value to `mc.example.com:25565`.

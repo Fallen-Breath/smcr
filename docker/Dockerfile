@@ -12,6 +12,7 @@ COPY ./ ./
 RUN CGO_ENABLED=0 go build -o smcr cmd/smcr/smcr.go
 
 FROM alpine:latest
+RUN apk add --no-cache tzdata  # so TZ environment works
 WORKDIR /app
 COPY --from=builder /build/smcr /app/smcr
 

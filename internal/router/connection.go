@@ -140,7 +140,7 @@ func (h *ConnectionHandler) handleConnection() {
 
 	// ============================== Write Handshake Packet etc. ==============================
 
-	if 1 <= route.ProxyProtocol || route.ProxyProtocol <= 2 {
+	if 1 <= route.ProxyProtocol && route.ProxyProtocol <= 2 {
 		isIpv4 := func(addr net.Addr) bool {
 			tcpAddr, err := net.ResolveTCPAddr("tcp", addr.String())
 			if err != nil {

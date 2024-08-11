@@ -35,7 +35,11 @@ Prepare your config file, then you can start SMCR with the following command
 
 ```bash
 ./smcr  # use ./config.yml as the configuration
-./smcr -c /path/to/config.yml
+./smcr -c /path/to/config.yml  # explicitly supply the path to the config
+
+# declare config content in environment variable SMCR_CONFIG (yaml format)
+export SMCR_CONFIG='{"listen": "0.0.0.0:7777", "routes": [{"name": "default", "matches": ["example.com"], "target": "127.0.0.1:25565"}]}'
+./smcr
 ```
 
 ### Config Examples

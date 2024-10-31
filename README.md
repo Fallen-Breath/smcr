@@ -81,7 +81,7 @@ routes:
 ```
 
 A connection forwarder that modifies the server address in the handshake packet from whatever value to `mc.example.com:25565`.
-Notes that the only route in the config has the name `default`
+Notes that the only route in the config has the name `default`, so all client connections will be handled by this route
 
 ```yaml
 listen: 0.0.0.0:7777
@@ -101,7 +101,6 @@ routes:
       - 127.0.0.1
       - example.com:20001
     target: 127.0.0.1:25577
-    mimic: mc.example.com:25565
     proxy_protocol: 2
 ```
 

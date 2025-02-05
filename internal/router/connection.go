@@ -102,7 +102,7 @@ func (h *ConnectionHandler) handleConnection() {
 	}
 	msg += fmt.Sprintf(": %s:%d", hostname, port)
 	if len(hostnameTail) > 0 {
-		msg += fmt.Sprintf(", hostname tail: '%s'", hostnameTail)
+		msg += fmt.Sprintf(", hostname tail len %d", len(hostnameTail))
 	}
 	h.logger.Infof(msg)
 

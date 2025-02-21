@@ -204,10 +204,12 @@ func (h *ConnectionHandler) handleConnection() {
 }
 
 func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
-	var wg sync.WaitGroup
+	doneChan := make(chan struct{})
 
 	singleForward := func(desc string, s net.Conn, t net.Conn) {
-		defer wg.Done()
+		defer func() {
+			doneChan <- struct{}{}
+		}()
 		h.logger.Debugf("Forward start for %s", desc)
 		n, err := io.Copy(t, s)
 		if err != nil {
@@ -216,11 +218,13 @@ func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
 		h.logger.Debugf("Forward end for %s, bytes transfered = %d", desc, n)
 	}
 
-	wg.Add(1)
 	go singleForward("client -> target", source, target)
-	wg.Add(1)
 	go singleForward("client <- target", target, source)
-	wg.Wait()
+
+	_ = <-doneChan
+	_ = source.Close()
+	_ = target.Close()
+	_ = <-doneChan
 }
 
 // RouteFor might return nullable

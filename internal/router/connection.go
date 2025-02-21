@@ -41,14 +41,20 @@ func (h *ConnectionHandler) closeConnection(name string, conn net.Conn) {
 	}
 }
 
+func onceFunc(function func()) func() {
+	var once sync.Once
+	return func() {
+		once.Do(function)
+	}
+}
+
 func (h *ConnectionHandler) handleConnection() {
 	// ============================== Prepare ==============================
 
-	var once sync.Once
-	closeClientConn := func() {
+	closeClientConn := onceFunc(func() {
 		h.closeConnection("client", h.clientConn)
-	}
-	defer once.Do(closeClientConn)
+	})
+	defer closeClientConn()
 
 	// ============================== Read Handshake Packet ==============================
 
@@ -56,7 +62,7 @@ func (h *ConnectionHandler) handleConnection() {
 	deadlineTimer := time.AfterFunc(handshakeMaxTimeWait, func() {
 		h.logger.Errorf("Wait for handshake packet times out (%.0fs), closing connection", handshakeMaxTimeWait.Seconds())
 		handshakeTimeout = true
-		once.Do(closeClientConn)
+		closeClientConn()
 	})
 	connReadWriter := protocol.NewBufferReadWriter(h.clientConn)
 	handshakePacket, err := protocol.ReadHandshakePacket(connReadWriter)
@@ -84,7 +90,7 @@ func (h *ConnectionHandler) handleConnection() {
 				}
 			}
 		}
-		once.Do(closeClientConn)
+		closeClientConn()
 	}
 
 	// ============================== Do Route ==============================
@@ -136,7 +142,10 @@ func (h *ConnectionHandler) handleConnection() {
 		disconnectWithMessage(route.GetDialFailMessageJson())
 		return
 	}
-	defer h.closeConnection("target", targetConn)
+	closeTargetConn := onceFunc(func() {
+		h.closeConnection("target", targetConn)
+	})
+	defer closeTargetConn()
 
 	// ============================== Write Handshake Packet etc. ==============================
 
@@ -198,12 +207,15 @@ func (h *ConnectionHandler) handleConnection() {
 	// ============================== Start Forwarding ==============================
 
 	h.logger.Infof("Start forwarding")
-	h.forward(h.clientConn, targetConn)
+	h.forward(h.clientConn, targetConn, func() {
+		closeClientConn()
+		closeTargetConn()
+	})
 
 	h.logger.Infof("Client connection end")
 }
 
-func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
+func (h *ConnectionHandler) forward(source net.Conn, target net.Conn, closeConnectionFunc func()) {
 	doneChan := make(chan struct{})
 
 	singleForward := func(desc string, s net.Conn, t net.Conn) {
@@ -222,8 +234,7 @@ func (h *ConnectionHandler) forward(source net.Conn, target net.Conn) {
 	go singleForward("client <- target", target, source)
 
 	_ = <-doneChan
-	_ = source.Close()
-	_ = target.Close()
+	closeConnectionFunc()
 	_ = <-doneChan
 }
 

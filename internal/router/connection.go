@@ -217,6 +217,7 @@ func (h *ConnectionHandler) handleConnection() {
 
 func (h *ConnectionHandler) forward(source net.Conn, target net.Conn, closeConnectionFunc func()) {
 	doneChan := make(chan struct{})
+	doneFlag := false
 
 	singleForward := func(desc string, s net.Conn, t net.Conn) {
 		defer func() {
@@ -224,7 +225,7 @@ func (h *ConnectionHandler) forward(source net.Conn, target net.Conn, closeConne
 		}()
 		h.logger.Debugf("Forward start for %s", desc)
 		n, err := io.Copy(t, s)
-		if err != nil {
+		if err != nil && !doneFlag {
 			h.logger.Warningf("Forward error for %s: %v", desc, err)
 		}
 		h.logger.Debugf("Forward end for %s, bytes transfered = %d", desc, n)
@@ -234,6 +235,7 @@ func (h *ConnectionHandler) forward(source net.Conn, target net.Conn, closeConne
 	go singleForward("client <- target", target, source)
 
 	_ = <-doneChan
+	doneFlag = true
 	closeConnectionFunc()
 	_ = <-doneChan
 }

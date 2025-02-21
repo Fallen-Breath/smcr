@@ -16,4 +16,5 @@ RUN apk add --no-cache tzdata  # so TZ environment works
 WORKDIR /app
 COPY --from=builder /build/smcr /app/smcr
 
-ENTRYPOINT ["/app/smcr", "-c", "config.yml"]
+ENTRYPOINT ["/app/smcr"]
+CMD ["/app/smcr", "-c", "config.yml"]

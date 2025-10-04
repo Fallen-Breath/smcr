@@ -2,11 +2,6 @@ package router
 
 import (
 	"fmt"
-	"github.com/Fallen-Breath/smcr/internal/config"
-	"github.com/Fallen-Breath/smcr/internal/dns"
-	"github.com/Fallen-Breath/smcr/internal/protocol"
-	"github.com/pires/go-proxyproto"
-	log "github.com/sirupsen/logrus"
 	"io"
 	"net"
 	"strconv"
@@ -14,6 +9,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Fallen-Breath/smcr/internal/config"
+	"github.com/Fallen-Breath/smcr/internal/dns"
+	"github.com/Fallen-Breath/smcr/internal/protocol"
+	"github.com/pires/go-proxyproto"
+	log "github.com/sirupsen/logrus"
 )
 
 type ConnectionHandler struct {
@@ -56,6 +57,17 @@ func (h *ConnectionHandler) handleConnection() {
 		h.closeConnection("client", h.clientConn)
 	})
 	defer closeClientConn()
+
+	if len(h.config.WhitelistedIps) > 0 {
+		clientAddr := h.clientConn.RemoteAddr()
+		if ppConn, ok := h.clientConn.(*proxyproto.Conn); ok {
+			clientAddr = ppConn.Raw().RemoteAddr()
+		}
+		if !checkIpWhitelist(clientAddr, h.config.WhitelistedIps) {
+			h.logger.Infof("Rejected since client tcp addr %s not in whitelist", clientAddr)
+			return
+		}
+	}
 
 	// ============================== Read Handshake Packet ==============================
 

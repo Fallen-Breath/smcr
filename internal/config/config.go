@@ -3,10 +3,11 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"net"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const DefaultRouteName = "default"
@@ -44,9 +45,10 @@ type Config struct {
 	Listen                string        `yaml:"listen"`
 	Debug                 bool          `yaml:"debug"`
 	Routes                []Route       `yaml:"routes"`
-	DefaultConnectTimeout time.Duration `yaml:"default_connect_timeout"`  // optional, default 3s
-	SrvLookupTimeout      time.Duration `yaml:"srv_lookup_timeout"`       // optional, default 3s
-	ProxyProtocol         bool          `yaml:"proxy_protocol,omitempty"` // if client can send proxy protocol header to smcr. if true, PP header will be required
+	DefaultConnectTimeout time.Duration `yaml:"default_connect_timeout"`   // optional, default 3s
+	SrvLookupTimeout      time.Duration `yaml:"srv_lookup_timeout"`        // optional, default 3s
+	ProxyProtocol         bool          `yaml:"proxy_protocol,omitempty"`  // if client can send proxy protocol header to smcr. if true, PP header will be required
+	WhitelistedIps        []string      `yaml:"whitelisted_ips,omitempty"` // if provided, only connections from these ips / domains will be accepted
 
 	routeMap     map[string]*Route `yaml:"-"` // match_addr (lowered case) -> route
 	defaultRoute *Route            `yaml:"-"`

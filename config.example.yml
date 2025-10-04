@@ -33,3 +33,6 @@ routes:
 srv_lookup_timeout: 3s
 default_connect_timeout: 3s
 proxy_protocol: false
+whitelisted_ips:
+  - 127.0.0.1             # literal ip
+  - upstream.example.com  # domain (all resolved ips are included)

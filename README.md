@@ -108,7 +108,7 @@ routes:
 
 Here's a detailed explanation of all options in the config file
 
-### General options
+### General options (root object)
 
 #### listen
 
@@ -172,6 +172,20 @@ When enabled, client connections are required to send a proxy protocol header (i
 
 ```yaml
 proxy_protocol: false
+```
+
+#### whitelisted_ips
+
+Restricts connections to a whitelist of IP addresses or domains, when provided as a non-empty array
+
+Entries can be literal IPs, or domains (with all resolved domain IPs included dynamically)
+
+It always uses the real TCP remote address, regardless of whether [proxy_protocol](#proxy_protocol) is enabled
+
+```yaml
+whitelisted_ips:
+  - 127.0.0.1             # literal ip
+  - upstream.example.com  # domain (all resolved ips are included)
 ```
 
 ### Route

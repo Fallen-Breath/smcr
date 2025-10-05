@@ -190,7 +190,7 @@ whitelisted_ips:
 
 ### Route (the [routes](#routes) array)
 
-When received a client connection, SMCR will try to read the [handshake packet](https://wiki.vg/Protocol#Handshake) from the client and extract the hostname + port from it.
+When received a client connection, SMCR will try to read the [handshake packet](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Handshake) from the client and extract the hostname + port from it.
 
 #### name
 

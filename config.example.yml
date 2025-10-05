@@ -26,13 +26,13 @@ routes:
     action: reject
     reject_message: '{"text": "rejected", "color": "red"}'
 
-  # A default
+  # A route named `default` is the default route that works as a fallback
   - name: default
     target: 127.0.0.1:25567
 
 srv_lookup_timeout: 3s
 default_connect_timeout: 3s
-proxy_protocol: false
-whitelisted_ips:
+proxy_protocol: false     # if set to true, read haproxy protocol header from incoming client connection
+whitelisted_ips:          # if provided, only connections from these ips / domains will be accepted
   - 127.0.0.1             # literal ip
   - upstream.example.com  # domain (all resolved ips are included)

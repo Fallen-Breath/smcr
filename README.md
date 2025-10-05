@@ -108,7 +108,7 @@ routes:
 
 Here's a detailed explanation of all options in the config file
 
-### General options (root object)
+### General options (the root object)
 
 #### listen
 
@@ -132,7 +132,7 @@ log_level: false
 
 Route definition. It's an object list where each item represents a route
 
-See [section route](#route) for explanation on route items
+See [section route](#route-the-routes-array) for explanation on route items
 
 ```yaml
 routes:
@@ -188,7 +188,7 @@ whitelisted_ips:
   - upstream.example.com  # domain (all resolved ips are included)
 ```
 
-### Route
+### Route (the [routes](#routes) array)
 
 When received a client connection, SMCR will try to read the [handshake packet](https://wiki.vg/Protocol#Handshake) from the client and extract the hostname + port from it.
 
@@ -283,7 +283,7 @@ mimic: mc.hypixel.net:25565
 
 Optional, the maximum timeout for connecting to the target server.
 
-If not given the value from [default_connect_timeout](#defaultconnecttimeout) will be used
+If not given the value from [default_connect_timeout](#default_connect_timeout) will be used
 
 See section [timeout format section](#timeout-format) for more details on its format
 
